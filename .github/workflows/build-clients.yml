@@ -1,4 +1,4 @@
-name: Build Desktop Clients (Windows .exe & macOS .dmg)
+name: Build Desktop Clients (Windows .exe & macOS .dmg/.pkg)
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
 
 jobs:
   # ==========================================
-  # macOS Build: Compiles .app and creates .dmg
+  # macOS Build: Compiles .app and creates .dmg & .pkg
   # ==========================================
   build-macos:
     runs-on: macos-latest
@@ -27,7 +27,7 @@ jobs:
       - name: Install Client Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r client/requirements.txt
+          pip install -r client/requirements.txt pyinstaller
 
       - name: Build macOS .app Bundle
         run: |
@@ -89,7 +89,7 @@ jobs:
       - name: Install Client Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r client/requirements.txt
+          pip install -r client/requirements.txt pyinstaller
 
       - name: Build Windows .exe
         run: |
@@ -107,3 +107,49 @@ jobs:
           name: EnterpriseBackupAgent-Windows-EXE
           path: dist/EnterpriseBackupAgent.exe
           retention-days: 30
+
+  # ==========================================
+  # Release: Automatically publishes downloadable files
+  # ==========================================
+  release:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    steps:
+      - name: Download Windows EXE
+        uses: actions/download-artifact@v4
+        with:
+          name: EnterpriseBackupAgent-Windows-EXE
+          path: release_assets
+
+      - name: Download macOS DMG
+        uses: actions/download-artifact@v4
+        with:
+          name: EnterpriseBackupAgent-macOS-DMG
+          path: release_assets
+
+      - name: Download macOS PKG
+        uses: actions/download-artifact@v4
+        with:
+          name: EnterpriseBackupAgent-macOS-PKG
+          path: release_assets
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "Enterprise Backup Desktop Clients"
+          body: |
+            ## Enterprise Endpoint Backup & Sync - Client Installers
+            
+            - **macOS Installer (.pkg):** Double-click to install directly to `/Applications`
+            - **macOS Disk Image (.dmg):** Open and drag to Applications
+            - **Windows Client (.exe):** Portable standalone executable
+          files: |
+            release_assets/EnterpriseBackupAgent.exe
+            release_assets/EnterpriseBackupAgent.dmg
+            release_assets/EnterpriseBackupAgent.pkg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

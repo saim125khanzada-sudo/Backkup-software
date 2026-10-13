@@ -1,9 +1,9 @@
 #!/bin/bash
 # ==============================================================================
-# Enterprise Endpoint Backup & Sync - macOS 1-Click Client Installer
+# Enterprise Endpoint Backup & Sync - macOS Client Installer
 # ==============================================================================
 
-set -e
+set -eo pipefail
 
 echo "=================================================================="
 echo "    Enterprise Endpoint Backup & Sync - macOS Client Setup        "
@@ -17,36 +17,30 @@ LAUNCH_AGENT="$HOME/Library/LaunchAgents/com.enterprise.backup.plist"
 mkdir -p "$APP_DIR"
 mkdir -p "$CONFIG_DIR"
 
-# 1. Obtain daemon files
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" 2>/dev/null && pwd )"
-if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/client_daemon.py" ]; then
-    echo "[1/4] Copying client files..."
-    cp -f "$SCRIPT_DIR/client_daemon.py" "$APP_DIR/"
-    cp -f "$SCRIPT_DIR/requirements.txt" "$APP_DIR/"
-else
-    echo "[1/4] Downloading latest client files..."
-    curl -fsSL "https://raw.githubusercontent.com/saim125khanzada-sudo/Backkup-software/main/client/client_daemon.py" -o "$APP_DIR/client_daemon.py"
-    curl -fsSL "https://raw.githubusercontent.com/saim125khanzada-sudo/Backkup-software/main/client/requirements.txt" -o "$APP_DIR/requirements.txt"
-fi
+# 1. Download client daemon and requirements
+echo "[1/4] Fetching client files..."
+curl -fsSL "https://raw.githubusercontent.com/saim125khanzada-sudo/Backkup-software/main/client/client_daemon.py" -o "$APP_DIR/client_daemon.py"
+curl -fsSL "https://raw.githubusercontent.com/saim125khanzada-sudo/Backkup-software/main/client/requirements.txt" -o "$APP_DIR/requirements.txt"
 
 cd "$APP_DIR"
 
 # 2. Check Python 3
-echo "[2/4] Checking Python 3 runtime..."
+echo "[2/4] Verifying Python runtime..."
 if ! command -v python3 &> /dev/null; then
-    echo "Python 3 is required. Launching developer tools installer..."
-    xcode-select --install
-    echo "Please finish the prompt on screen and run the installer again."
+    echo "Python 3 is required. Please install Python from https://www.python.org/downloads/macos/ or run: xcode-select --install"
+    xcode-select --install || true
     exit 1
 fi
 
-# 3. Create isolated virtual environment
-echo "[3/4] Installing dependencies (watchdog, httpx, pystray, pillow)..."
+# 3. Create virtual environment and install packages
+echo "[3/4] Setting up dependencies..."
 if [ ! -d "venv" ]; then
     python3 -m venv venv || {
-        echo "Creating venv failed. Attempting ensurepip..."
-        python3 -m ensurepip --upgrade || true
-        python3 -m venv venv
+        echo "Standard venv failed, bootstrapping pip..."
+        python3 -m venv --without-pip venv || true
+        curl -fsSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+        ./venv/bin/python get-pip.py
+        rm -f get-pip.py
     }
 fi
 
@@ -89,11 +83,9 @@ xattr -cr "$APP_DIR" 2>/dev/null || true
 
 echo ""
 echo "=================================================================="
-echo "  Installation Successful!                                        "
-echo "  Launching Setup Window on your screen now...                    "
+echo "  Setup Complete! Launching Agent Setup Window...                 "
 echo "=================================================================="
-echo "Please enter your Server IP (e.g. 192.168.2.88), Email, and Password."
 echo ""
 
-# Launch the client daemon
-./venv/bin/python3 client_daemon.py &
+# Launch detached in Aqua user session
+nohup "$APP_DIR/venv/bin/python3" "$APP_DIR/client_daemon.py" > "$CONFIG_DIR/agent.log" 2>&1 &
