@@ -146,10 +146,10 @@ class SetupDialog:
         form = tk.Frame(self.root, bg="#0f172a", padx=25, pady=20)
         form.pack(fill="both", expand=True)
 
-        # Server URL
-        tk.Label(form, text="Server URL:", font=("Segoe UI", 9, "bold"), fg="#e2e8f0", bg="#0f172a").pack(anchor="w")
+        # Server IP or URL
+        tk.Label(form, text="Server IP or Hostname (e.g. 192.168.2.88):", font=("Segoe UI", 9, "bold"), fg="#e2e8f0", bg="#0f172a").pack(anchor="w")
         self.server_entry = tk.Entry(form, font=("Segoe UI", 9), bg="#1e293b", fg="#ffffff", insertbackground="#ffffff", relief="flat")
-        self.server_entry.insert(0, self.cfg.get("server_url", "http://localhost"))
+        self.server_entry.insert(0, self.cfg.get("server_url", "192.168.2.88"))
         self.server_entry.pack(fill="x", pady=(2, 10), ipady=4)
 
         # Email
@@ -212,6 +212,10 @@ class SetupDialog:
         if not server_url or not email or not password or not folder:
             messagebox.showerror("Validation Error", "All fields are required.")
             return
+
+        # Auto-prepend http:// if plain IP or hostname was entered
+        if not server_url.startswith("http://") and not server_url.startswith("https://"):
+            server_url = f"http://{server_url}"
 
         self.status_lbl.config(text="Authenticating with enterprise server...")
         self.root.update()
