@@ -59,6 +59,17 @@ jobs:
           path: dist/EnterpriseBackupAgent.dmg
           retention-days: 30
 
+      - name: Package into Apple Installer Package (.pkg)
+        run: |
+          pkgbuild --component dist/EnterpriseBackupAgent.app --install-location /Applications dist/EnterpriseBackupAgent.pkg
+
+      - name: Upload macOS .pkg Installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: EnterpriseBackupAgent-macOS-PKG
+          path: dist/EnterpriseBackupAgent.pkg
+          retention-days: 30
+
   # ==========================================
   # Windows Build: Compiles standalone .exe
   # ==========================================
