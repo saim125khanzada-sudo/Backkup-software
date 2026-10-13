@@ -16,7 +16,6 @@ pip install -r requirements.txt
 echo [3/4] Packaging Executable via PyInstaller...
 pyinstaller --noconfirm --onedir --windowed ^
     --name "EnterpriseBackupAgent" ^
-    --add-data "config.json;." ^
     --hidden-import "pystray" ^
     --hidden-import "watchdog.observers" ^
     --hidden-import "PIL" ^
