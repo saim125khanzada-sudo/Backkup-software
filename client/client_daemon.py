@@ -397,7 +397,8 @@ class EndpointSyncDaemon:
         headers = {"Authorization": f"Bearer {token}"}
 
         try:
-            with httpx.Client(base_url=server_url, timeout=60.0) as client:
+            sync_timeout = httpx.Timeout(3600.0, connect=30.0)
+            with httpx.Client(base_url=server_url, timeout=sync_timeout) as client:
                 # 2. Fast Hash Check
                 check_res = client.post(
                     "/api/v1/sync/check-hashes",
