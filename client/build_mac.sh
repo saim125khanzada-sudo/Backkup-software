@@ -24,7 +24,19 @@ pyinstaller --noconfirm --windowed \
     --hidden-import "tkinter" \
     client_daemon.py
 
+echo "[4/5] Packaging into Apple Disk Image (.dmg)..."
+mkdir -p dist/dmg_staging
+cp -R dist/EnterpriseBackupAgent.app dist/dmg_staging/
+ln -s /Applications dist/dmg_staging/Applications
+
+hdiutil create -volname "Enterprise Backup Agent" \
+    -srcfolder dist/dmg_staging \
+    -ov -format UDZO \
+    dist/EnterpriseBackupAgent.dmg
+
+rm -rf dist/dmg_staging
+
 echo ""
-echo "[4/4] Build Complete!"
-echo "Native macOS Application ready in: dist/EnterpriseBackupAgent.app"
-echo "You can move this to /Applications or create a DMG installer."
+echo "[5/5] Build Complete!"
+echo "Native macOS Installer ready in: dist/EnterpriseBackupAgent.dmg"
+echo "You can double-click this .dmg and drag the app into Applications."
