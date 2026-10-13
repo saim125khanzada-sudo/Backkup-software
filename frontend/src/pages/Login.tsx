@@ -19,7 +19,14 @@ export const Login: React.FC = () => {
       const res = await apiClient.post("/auth/login", { email, password });
       login(res.data.access_token, res.data.user);
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Authentication failed. Check your credentials.");
+      const detail = err.response?.data?.detail;
+      if (typeof detail === "string") {
+        setError(detail);
+      } else if (Array.isArray(detail) && detail.length > 0) {
+        setError(detail.map((d: any) => d.msg || d).join(", "));
+      } else {
+        setError("Authentication failed. Check your credentials.");
+      }
     } finally {
       setLoading(false);
     }

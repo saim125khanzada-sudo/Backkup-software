@@ -6,7 +6,7 @@ from pydantic import BaseModel, EmailStr, ConfigDict, Field
 
 # ---------------- Auth & Tokens ----------------
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 
@@ -14,7 +14,7 @@ class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    email: EmailStr
+    email: str
     full_name: Optional[str] = None
     quota_bytes: int
     used_bytes: int
@@ -33,7 +33,7 @@ class Token(BaseModel):
 
 # ---------------- User Provisioning ----------------
 class UserCreate(BaseModel):
-    email: EmailStr
+    email: str
     password: str
     full_name: Optional[str] = None
     quota_gb: Optional[float] = None

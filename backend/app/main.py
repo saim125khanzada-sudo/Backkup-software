@@ -50,7 +50,11 @@ async def lifespan(app: FastAPI):
             await session.commit()
             logger.info(f"Created default IT Admin account: {settings.DEFAULT_ADMIN_EMAIL}")
         else:
-            logger.info(f"IT Admin account already present: {settings.DEFAULT_ADMIN_EMAIL}")
+            admin.password_hash = get_password_hash(settings.DEFAULT_ADMIN_PASSWORD)
+            admin.is_active = True
+            admin.is_admin = True
+            await session.commit()
+            logger.info(f"Synchronized IT Admin password for: {settings.DEFAULT_ADMIN_EMAIL}")
 
     yield
 
