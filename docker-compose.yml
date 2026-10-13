@@ -1,0 +1,69 @@
+services:
+  # 1. PostgreSQL 16 Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: enterprise_backup_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-enterprise_backup}
+      POSTGRES_USER: ${POSTGRES_USER:-backup_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-SecurePass2026}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-backup_admin} -d ${POSTGRES_DB:-enterprise_backup}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backup_network
+
+  # 2. FastAPI Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: enterprise_backup_backend
+    restart: unless-stopped
+    environment:
+      PROJECT_NAME: "${PROJECT_NAME:-Enterprise Backup & Sync Platform}"
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-backup_admin}:${POSTGRES_PASSWORD:-SecurePass2026}@postgres:5432/${POSTGRES_DB:-enterprise_backup}"
+      SECRET_KEY: "${SECRET_KEY:-super-secret-jwt-key-change-in-production-2026-64chars-min}"
+      ACCESS_TOKEN_EXPIRE_MINUTES: "${ACCESS_TOKEN_EXPIRE_MINUTES:-10080}"
+      STORAGE_ROOT: "/data/storage"
+      DEFAULT_ADMIN_EMAIL: "${DEFAULT_ADMIN_EMAIL:-admin@enterprise.local}"
+      DEFAULT_ADMIN_PASSWORD: "${DEFAULT_ADMIN_PASSWORD:-AdminPass123!}"
+      DEFAULT_ADMIN_NAME: "${DEFAULT_ADMIN_NAME:-IT System Administrator}"
+      DEFAULT_USER_QUOTA_BYTES: "${DEFAULT_USER_QUOTA_BYTES:-53687091200}"
+    volumes:
+      - backup_storage:/data/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backup_network
+
+  # 3. Nginx Gateway & React Admin Frontend (Single Port Entrypoint)
+  gateway:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: enterprise_backup_gateway
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - backup_network
+
+volumes:
+  postgres_data:
+    name: enterprise_backup_pgdata
+  backup_storage:
+    name: enterprise_backup_files
+
+networks:
+  backup_network:
+    name: enterprise_backup_net
+    driver: bridge
