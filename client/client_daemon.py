@@ -1,4 +1,4 @@
-﻿"""
+"""
 Enterprise Endpoint Backup & Sync - Desktop Client Daemon
 Compatible with Windows and macOS.
 Monitors configured folders, debounces file write events, computes SHA-256 hashes,

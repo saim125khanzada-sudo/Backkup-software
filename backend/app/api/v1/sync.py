@@ -1,4 +1,4 @@
-﻿from uuid import UUID
+from uuid import UUID
 from datetime import datetime, timezone
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form

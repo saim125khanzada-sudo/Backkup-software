@@ -1,4 +1,4 @@
-﻿from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Union, Any
 from jose import jwt, JWTError
 from passlib.context import CryptContext

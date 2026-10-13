@@ -1,4 +1,4 @@
-﻿import uuid
+import uuid
 from datetime import datetime, timezone
 from typing import Optional, Any
 from sqlalchemy import String, DateTime, ForeignKey

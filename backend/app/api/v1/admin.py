@@ -1,4 +1,4 @@
-﻿import csv
+import csv
 import io
 from uuid import UUID
 from datetime import datetime, timedelta, timezone

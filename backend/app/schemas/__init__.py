@@ -1,4 +1,4 @@
-﻿from uuid import UUID
+from uuid import UUID
 from datetime import datetime
 from typing import Optional, List, Any
 from pydantic import BaseModel, EmailStr, ConfigDict, Field

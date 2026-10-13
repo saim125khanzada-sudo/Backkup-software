@@ -1,4 +1,4 @@
-﻿# Multi-stage build: 1. Build React SPA
+# Multi-stage build: 1. Build React SPA
 FROM node:20-alpine AS builder
 
 WORKDIR /app
