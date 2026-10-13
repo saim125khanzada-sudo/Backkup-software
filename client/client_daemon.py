@@ -317,7 +317,7 @@ class EndpointSyncDaemon:
         try:
             with open(file_path, "rb") as f:
                 while True:
-                    chunk = f.read(65536)
+                    chunk = f.read(1024 * 1024) # 1MB chunk for high-speed hashing
                     if not chunk:
                         break
                     sha.update(chunk)
@@ -329,14 +329,13 @@ class EndpointSyncDaemon:
         rel = os.path.relpath(abs_path, root_watch_dir)
         return rel.replace("\\", "/")
 
-    # Event Debouncer
-    def schedule_event(self, abs_path: str, action: str = "upload"):
+    # Event Debouncer & Scheduler
+    def schedule_event(self, abs_path: str, action: str = "upload", delay: float = 2.0):
         if self.should_ignore(abs_path):
             return
 
         with self.lock:
-            # 2.0-second debounce timer
-            self.pending_files[abs_path] = (time.time() + 2.0, action)
+            self.pending_files[abs_path] = (time.time() + delay, action)
 
     def handle_local_deletion(self, abs_path: str, root_watch_dir: str):
         if self.should_ignore(abs_path):
@@ -354,7 +353,7 @@ class EndpointSyncDaemon:
             return
 
         try:
-            with httpx.Client(base_url=server_url, timeout=10.0) as client:
+            with httpx.Client(base_url=server_url, timeout=15.0) as client:
                 headers = {"Authorization": f"Bearer {token}"}
                 res = client.post(
                     "/api/v1/sync/mark-deleted",
@@ -368,20 +367,23 @@ class EndpointSyncDaemon:
         except Exception as e:
             print(f"[SYNC ERROR] Failed to report deletion for {rel_path}: {e}")
 
-    # Upload file to server
+    # Upload file to server with live progress tracking & auto-retry
     def upload_file(self, abs_path: str, root_watch_dir: str):
         if not os.path.exists(abs_path) or not os.path.isfile(abs_path):
             return
 
         rel_path = self.get_relative_path(abs_path, root_watch_dir)
+        filename = os.path.basename(abs_path)
 
         # If user created/restored the file locally, remove tombstone
         if config_manager.is_tombstoned(rel_path):
             config_manager.remove_tombstone(rel_path)
 
-        # 1. Compute Hash
+        # 1. Compute Hash (if file is locked/copying, retry in 4s)
         sha256 = self.compute_sha256(abs_path)
         if not sha256:
+            print(f"[SYNC] File busy or writing in progress: {filename}, retrying in 4s...")
+            self.schedule_event(abs_path, "upload", delay=4.0)
             return
 
         file_size = os.path.getsize(abs_path)
@@ -415,8 +417,35 @@ class EndpointSyncDaemon:
                         # Already matches server hash!
                         return
 
-                # 3. Stream Upload
-                with open(abs_path, "rb") as f:
+                # 3. Stream Upload with live progress reporting
+                class ProgressFileReader:
+                    def __init__(outer_self, path, on_progress=None):
+                        outer_self.f = open(path, "rb")
+                        outer_self.total = file_size
+                        outer_self.read_bytes = 0
+                        outer_self.on_progress = on_progress
+                        outer_self.last_ts = time.time()
+
+                    def read(outer_self, size=-1):
+                        data = outer_self.f.read(size)
+                        if data:
+                            outer_self.read_bytes += len(data)
+                            now = time.time()
+                            if outer_self.on_progress and (now - outer_self.last_ts >= 1.5 or outer_self.read_bytes == outer_self.total):
+                                outer_self.last_ts = now
+                                outer_self.on_progress(outer_self.read_bytes, outer_self.total)
+                        return data
+
+                    def close(outer_self):
+                        outer_self.f.close()
+
+                def update_progress(bytes_done, total):
+                    pct = int((bytes_done / total) * 100) if total > 0 else 0
+                    mb_done = bytes_done / (1024 * 1024)
+                    mb_tot = total / (1024 * 1024)
+                    self.update_status(f"Syncing: {filename} ({pct}% - {mb_done:.1f}/{mb_tot:.1f} MB)", "blue")
+
+                with ProgressFileReader(abs_path, on_progress=update_progress) as stream_reader:
                     upload_res = client.post(
                         "/api/v1/sync/upload",
                         headers=headers,
@@ -425,15 +454,22 @@ class EndpointSyncDaemon:
                             "device_id": device_id or "",
                             "client_modified_at": mtime
                         },
-                        files={"file": (os.path.basename(abs_path), f)}
+                        files={"file": (filename, stream_reader)}
                     )
-                    if upload_res.status_code == 200:
-                        print(f"[SYNC] Successfully uploaded {rel_path} ({file_size} bytes)")
-                    else:
-                        print(f"[SYNC ERROR] Upload failed: {upload_res.status_code} {upload_res.text}")
+
+                if upload_res.status_code == 200:
+                    print(f"[SYNC] Successfully uploaded {rel_path} ({file_size} bytes)")
+                else:
+                    print(f"[SYNC ERROR] Upload failed ({upload_res.status_code}): {upload_res.text}")
+                    # Re-schedule for retry after 15s
+                    self.schedule_event(abs_path, "upload", delay=15.0)
+                    self.update_status(f"Sync retry: {filename} in 15s", "red")
 
         except Exception as e:
             print(f"[SYNC ERROR] Upload exception for {rel_path}: {e}")
+            # Re-enqueue for retry after 15s
+            self.schedule_event(abs_path, "upload", delay=15.0)
+            self.update_status(f"Sync retry: {filename} in 15s", "red")
 
     # Background worker checking debounce queue
     def debounce_worker(self):
@@ -452,7 +488,6 @@ class EndpointSyncDaemon:
                         del self.pending_files[path]
 
             if to_process:
-                self.update_status(f"Syncing ({len(to_process)} remaining)", "blue")
                 root_dirs = config_manager.data.get("watch_paths", [])
                 root_watch_dir = root_dirs[0] if root_dirs else str(Path.home() / "Documents")
 
@@ -462,7 +497,9 @@ class EndpointSyncDaemon:
                     elif action == "delete":
                         self.handle_local_deletion(path, root_watch_dir)
 
-                self.update_status("Idle", "green")
+                with self.lock:
+                    if not self.pending_files:
+                        self.update_status("Idle", "green")
 
             time.sleep(0.5)
 
