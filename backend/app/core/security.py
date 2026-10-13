@@ -10,16 +10,31 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.database import get_db
 
+import bcrypt
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    plain_bytes = plain_password.strip().encode("utf-8")
+    hashed_bytes = hashed_password.strip().encode("utf-8")
+    try:
+        if bcrypt.checkpw(plain_bytes, hashed_bytes):
+            return True
+    except Exception:
+        pass
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except Exception:
+        return False
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    try:
+        salt = bcrypt.gensalt()
+        return bcrypt.hashpw(password.strip().encode("utf-8"), salt).decode("utf-8")
+    except Exception:
+        return pwd_context.hash(password.strip())
 
 
 def create_access_token(subject: Union[str, Any], expires_delta: Optional[timedelta] = None) -> str:
