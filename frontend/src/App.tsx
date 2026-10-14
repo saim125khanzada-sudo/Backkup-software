@@ -6,6 +6,7 @@ import { Dashboard } from "./pages/Dashboard";
 import { UsersManager } from "./pages/UsersManager";
 import { FileExplorer } from "./pages/FileExplorer";
 import { AuditLogs } from "./pages/AuditLogs";
+import { SecurityAlerts } from "./pages/SecurityAlerts";
 import { CreateUserModal } from "./components/CreateUserModal";
 import { BatchCsvModal } from "./components/BatchCsvModal";
 import { EditUserModal } from "./components/EditUserModal";
@@ -13,7 +14,7 @@ import { User } from "./context/AuthContext";
 
 export const App: React.FC = () => {
   const { isAuthenticated, loading } = useAuth();
-  const [currentTab, setCurrentTab] = useState<"dashboard" | "users" | "files" | "audit">("dashboard");
+  const [currentTab, setCurrentTab] = useState<"dashboard" | "users" | "files" | "audit" | "alerts">("dashboard");
 
   // Global modals
   const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
@@ -66,6 +67,8 @@ export const App: React.FC = () => {
         )}
 
         {currentTab === "files" && <FileExplorer initialUser={targetUserForFiles} />}
+
+        {currentTab === "alerts" && <SecurityAlerts />}
 
         {currentTab === "audit" && <AuditLogs />}
       </main>

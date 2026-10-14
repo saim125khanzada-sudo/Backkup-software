@@ -10,6 +10,7 @@ import aiofiles
 from fastapi import UploadFile, HTTPException
 
 from app.core.config import settings
+from app.services.threat_scanner import threat_scanner_service, MaliciousFileException
 
 
 class StorageService:
@@ -77,6 +78,15 @@ class StorageService:
         if ".." in clean_rel:
             raise HTTPException(status_code=400, detail="Invalid relative path traversal")
 
+        # 1. Pre-flight threat inspection on filename and path
+        name_threat = threat_scanner_service.inspect_filename(clean_rel)
+        if name_threat:
+            threat_type, reason = name_threat
+            raise MaliciousFileException(
+                threat_type=threat_type,
+                details={"reason": reason, "relative_path": clean_rel, "layer": "filename_pre_check"}
+            )
+
         dest_file_path = self.get_user_storage_dir(user_id) / clean_rel
         dest_file_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -84,30 +94,60 @@ class StorageService:
 
         sha256 = hashlib.sha256()
         bytes_written = 0
+        initial_chunk = b""
+        sample_buffer = bytearray()
 
-        async with aiofiles.open(temp_path, "wb") as out_f:
-            while True:
-                chunk = await upload_file.read(settings.STREAM_CHUNK_SIZE)
-                if not chunk:
-                    break
-                bytes_written += len(chunk)
-                if bytes_written > settings.MAX_SINGLE_FILE_BYTES:
-                    if temp_path.exists():
-                        temp_path.unlink()
-                    raise HTTPException(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        detail="File exceeds maximum allowed single file size limit of 1GB"
-                    )
-                sha256.update(chunk)
-                await out_f.write(chunk)
+        try:
+            async with aiofiles.open(temp_path, "wb") as out_f:
+                while True:
+                    chunk = await upload_file.read(settings.STREAM_CHUNK_SIZE)
+                    if not chunk:
+                        break
 
-        # Atomically replace destination file
-        if temp_path.exists():
-            if dest_file_path.exists():
-                dest_file_path.unlink()
-            shutil.move(str(temp_path), str(dest_file_path))
+                    if not initial_chunk:
+                        initial_chunk = chunk[:8192]
 
-        return str(dest_file_path), bytes_written, sha256.hexdigest()
+                    if len(sample_buffer) < 32768:
+                        needed = 32768 - len(sample_buffer)
+                        sample_buffer.extend(chunk[:needed])
+
+                    bytes_written += len(chunk)
+                    if bytes_written > settings.MAX_SINGLE_FILE_BYTES:
+                        raise HTTPException(
+                            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            detail="File exceeds maximum allowed single file size limit of 1GB"
+                        )
+                    sha256.update(chunk)
+                    await out_f.write(chunk)
+
+            # 2. Deep buffer & entropy threat scan
+            threat_found = threat_scanner_service.inspect_buffer(
+                filename=clean_rel,
+                initial_chunk=initial_chunk,
+                total_data_sample=bytes(sample_buffer)
+            )
+            if threat_found:
+                threat_type, reason, details = threat_found
+                details["reason"] = reason
+                details["relative_path"] = clean_rel
+                details["file_size"] = bytes_written
+                raise MaliciousFileException(threat_type=threat_type, details=details)
+
+            # Atomically replace destination file
+            if temp_path.exists():
+                if dest_file_path.exists():
+                    dest_file_path.unlink()
+                shutil.move(str(temp_path), str(dest_file_path))
+
+            return str(dest_file_path), bytes_written, sha256.hexdigest()
+
+        except Exception:
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
+            raise
 
     async def create_version_snapshot(
         self,

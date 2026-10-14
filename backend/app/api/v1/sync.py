@@ -1,6 +1,7 @@
 from uuid import UUID
 from datetime import datetime, timezone
 from typing import Optional, List
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -10,11 +11,14 @@ from app.core.security import get_current_user
 from app.models.user import User
 from app.models.device import Device
 from app.models.file import FileRecord
+from app.models.security_alert import SecurityAlert
 from app.schemas import (
     HandshakeRequest, HandshakeResponse, UserOut,
-    HashCheckRequest, HashCheckResponse, MarkDeletedRequest, FileRecordOut
+    HashCheckRequest, HashCheckResponse, MarkDeletedRequest, FileRecordOut,
+    ReportThreatRequest
 )
 from app.services.sync_service import process_file_upload, mark_file_deleted_locally, log_audit
+from app.services.threat_scanner import MaliciousFileException
 
 router = APIRouter(prefix="/sync", tags=["Sync Protocol"])
 
@@ -142,14 +146,56 @@ async def upload_file(
         if dev:
             dev.last_seen_at = datetime.now(timezone.utc)
 
-    file_record = await process_file_upload(
-        db=db,
-        user=current_user,
-        device_id=device_id,
-        relative_path=relative_path,
-        client_modified_at=client_modified_at,
-        upload_file=file
-    )
+    norm_rel = relative_path.replace("\\", "/").strip("/\\")
+    try:
+        file_record = await process_file_upload(
+            db=db,
+            user=current_user,
+            device_id=device_id,
+            relative_path=norm_rel,
+            client_modified_at=client_modified_at,
+            upload_file=file
+        )
+    except MaliciousFileException as e:
+        folder_p = str(Path(norm_rel).parent).replace("\\", "/")
+        if folder_p == ".":
+            folder_p = "/"
+        file_name = Path(norm_rel).name
+
+        alert = SecurityAlert(
+            user_id=current_user.id,
+            device_id=device_id,
+            file_name=file_name,
+            folder_path=folder_p,
+            threat_type=e.threat_type,
+            severity="CRITICAL",
+            details=e.details,
+            status="UNRESOLVED"
+        )
+        db.add(alert)
+        await log_audit(
+            db,
+            current_user.id,
+            "SECURITY_ALERT_MALICIOUS_UPLOAD_BLOCKED",
+            {
+                "file_name": file_name,
+                "folder_path": folder_p,
+                "threat_type": e.threat_type,
+                "details": e.details
+            }
+        )
+        await db.commit()
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "MALICIOUS_CONTENT_BLOCKED",
+                "message": f"Security violation: File '{file_name}' was blocked from backup.",
+                "threat_type": e.threat_type,
+                "file_name": file_name,
+                "folder_path": folder_p
+            }
+        )
 
     return FileRecordOut(
         id=file_record.id,
@@ -166,6 +212,52 @@ async def upload_file(
         updated_at=file_record.updated_at,
         versions=[]
     )
+
+
+@router.post("/report-threat")
+async def report_threat(
+    req: ReportThreatRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Called by client agents when a malicious or ransomware file is intercepted locally.
+    Records alert for IT Administrator notification.
+    """
+    norm_rel = req.relative_path.replace("\\", "/").strip("/\\")
+    folder_p = str(Path(norm_rel).parent).replace("\\", "/")
+    if folder_p == ".":
+        folder_p = "/"
+
+    alert = SecurityAlert(
+        user_id=current_user.id,
+        device_id=req.device_id,
+        file_name=req.file_name,
+        folder_path=folder_p,
+        threat_type=req.threat_type,
+        severity="CRITICAL",
+        details=req.details,
+        status="UNRESOLVED"
+    )
+    db.add(alert)
+    await log_audit(
+        db,
+        current_user.id,
+        "SECURITY_ALERT_CLIENT_PREFLIGHT_BLOCKED",
+        {
+            "file_name": req.file_name,
+            "folder_path": folder_p,
+            "threat_type": req.threat_type,
+            "details": req.details
+        }
+    )
+    await db.commit()
+
+    return {
+        "status": "threat_recorded",
+        "alert_id": str(alert.id),
+        "admin_notified": True
+    }
 
 
 @router.post("/mark-deleted")

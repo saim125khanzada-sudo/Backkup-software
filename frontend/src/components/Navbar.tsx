@@ -1,14 +1,31 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
-import { HardDrive, Users, FolderTree, ShieldCheck, LogOut, Activity } from "lucide-react";
+import apiClient from "../api/client";
+import { HardDrive, Users, FolderTree, ShieldCheck, LogOut, Activity, ShieldAlert } from "lucide-react";
 
 interface NavbarProps {
-  currentTab: "dashboard" | "users" | "files" | "audit";
-  onTabChange: (tab: "dashboard" | "users" | "files" | "audit") => void;
+  currentTab: "dashboard" | "users" | "files" | "audit" | "alerts";
+  onTabChange: (tab: "dashboard" | "users" | "files" | "audit" | "alerts") => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ currentTab, onTabChange }) => {
   const { user, logout } = useAuth();
+  const [unresolvedAlerts, setUnresolvedAlerts] = useState<number>(0);
+
+  const checkAlerts = async () => {
+    try {
+      const res = await apiClient.get<{ unresolved_count: number }>("/admin/alerts/count");
+      setUnresolvedAlerts(res.data.unresolved_count);
+    } catch {
+      // Ignore background poll errors
+    }
+  };
+
+  useEffect(() => {
+    checkAlerts();
+    const interval = setInterval(checkAlerts, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <header className="bg-slate-800 border-b border-slate-700 sticky top-0 z-30 shadow-md">
@@ -66,6 +83,25 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onTabChange }) => {
             >
               <FolderTree className="h-4 w-4" />
               <span>File Explorer</span>
+            </button>
+
+            <button
+              onClick={() => onTabChange("alerts")}
+              className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors relative ${
+                currentTab === "alerts"
+                  ? "bg-slate-900 text-red-400 border border-slate-700"
+                  : unresolvedAlerts > 0
+                  ? "text-red-400 hover:bg-red-950/40"
+                  : "text-slate-300 hover:bg-slate-700 hover:text-white"
+              }`}
+            >
+              <ShieldAlert className="h-4 w-4" />
+              <span>Security Alerts</span>
+              {unresolvedAlerts > 0 && (
+                <span className="ml-1 px-1.5 py-0.2 rounded-full bg-red-600 text-white text-[10px] font-bold animate-pulse">
+                  {unresolvedAlerts}
+                </span>
+              )}
             </button>
 
             <button

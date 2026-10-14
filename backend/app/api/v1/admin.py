@@ -16,9 +16,11 @@ from app.models.user import User
 from app.models.device import Device
 from app.models.file import FileRecord, FileVersion
 from app.models.audit import AuditLog
+from app.models.security_alert import SecurityAlert
 from app.schemas import (
     UserOut, UserCreate, UserUpdate, BatchUserResult,
-    FileRecordOut, FileVersionOut, AuditLogOut, AdminStats
+    FileRecordOut, FileVersionOut, AuditLogOut, AdminStats,
+    SecurityAlertOut, SecurityAlertCountResponse
 )
 from app.services.storage import storage_service
 from app.services.sync_service import log_audit
@@ -552,3 +554,112 @@ async def get_audit_logs(
             created_at=audit.created_at
         ))
     return output
+
+
+# ---------------- Security & Anti-Ransomware Alerts ----------------
+@router.get("/alerts", response_model=List[SecurityAlertOut])
+async def list_security_alerts(
+    status_filter: Optional[str] = Query(None, alias="status", description="Filter by status: UNRESOLVED, ACKNOWLEDGED, RESOLVED, ALL"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db)
+):
+    query = (
+        select(
+            SecurityAlert,
+            User.email.label("user_email"),
+            User.full_name.label("user_name"),
+            Device.device_name.label("device_name"),
+            Device.os.label("device_os")
+        )
+        .outerjoin(User, SecurityAlert.user_id == User.id)
+        .outerjoin(Device, SecurityAlert.device_id == Device.id)
+    )
+    if status_filter and status_filter.upper() != "ALL":
+        query = query.where(SecurityAlert.status == status_filter.upper())
+
+    query = query.order_by(SecurityAlert.created_at.desc()).offset(skip).limit(limit)
+    res = await db.execute(query)
+    rows = res.all()
+
+    output = []
+    for alert, u_email, u_name, d_name, d_os in rows:
+        output.append(SecurityAlertOut(
+            id=alert.id,
+            user_id=alert.user_id,
+            user_email=u_email,
+            user_name=u_name,
+            device_id=alert.device_id,
+            device_name=d_name,
+            device_os=d_os,
+            file_name=alert.file_name,
+            folder_path=alert.folder_path,
+            threat_type=alert.threat_type,
+            severity=alert.severity,
+            details=alert.details,
+            status=alert.status,
+            created_at=alert.created_at
+        ))
+    return output
+
+
+@router.get("/alerts/count", response_model=SecurityAlertCountResponse)
+async def get_alerts_count(db: AsyncSession = Depends(get_db)):
+    unresolved_res = await db.execute(
+        select(func.count(SecurityAlert.id)).where(SecurityAlert.status == "UNRESOLVED")
+    )
+    unresolved_count = unresolved_res.scalar() or 0
+
+    critical_res = await db.execute(
+        select(func.count(SecurityAlert.id)).where(SecurityAlert.status == "UNRESOLVED", SecurityAlert.severity == "CRITICAL")
+    )
+    critical_count = critical_res.scalar() or 0
+
+    return SecurityAlertCountResponse(
+        unresolved_count=unresolved_count,
+        critical_count=critical_count
+    )
+
+
+@router.post("/alerts/{alert_id}/acknowledge")
+async def acknowledge_alert(
+    alert_id: UUID,
+    current_admin: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db)
+):
+    res = await db.execute(select(SecurityAlert).where(SecurityAlert.id == alert_id))
+    alert = res.scalar_one_or_none()
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    alert.status = "ACKNOWLEDGED"
+    await log_audit(
+        db,
+        current_admin.id,
+        "SECURITY_ALERT_ACKNOWLEDGED",
+        {"alert_id": str(alert_id), "file_name": alert.file_name}
+    )
+    await db.commit()
+    return {"status": "acknowledged", "alert_id": str(alert_id)}
+
+
+@router.post("/alerts/{alert_id}/resolve")
+async def resolve_alert(
+    alert_id: UUID,
+    current_admin: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db)
+):
+    res = await db.execute(select(SecurityAlert).where(SecurityAlert.id == alert_id))
+    alert = res.scalar_one_or_none()
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    alert.status = "RESOLVED"
+    await log_audit(
+        db,
+        current_admin.id,
+        "SECURITY_ALERT_RESOLVED",
+        {"alert_id": str(alert_id), "file_name": alert.file_name}
+    )
+    await db.commit()
+    return {"status": "resolved", "alert_id": str(alert_id)}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import apiClient from "../api/client";
-import { HardDrive, Users, FolderTree, Laptop, ShieldCheck, ArrowUpRight, UserPlus, FileUp, RefreshCw } from "lucide-react";
+import { HardDrive, Users, FolderTree, Laptop, ShieldCheck, ArrowUpRight, UserPlus, FileUp, RefreshCw, ShieldAlert, AlertTriangle } from "lucide-react";
 
 interface AdminStats {
   total_users: number;
@@ -20,7 +20,7 @@ interface AuditLog {
 }
 
 interface DashboardProps {
-  onNavigate: (tab: "dashboard" | "users" | "files" | "audit") => void;
+  onNavigate: (tab: "dashboard" | "users" | "files" | "audit" | "alerts") => void;
   onOpenCreateUser: () => void;
   onOpenBatchCsv: () => void;
 }
@@ -28,6 +28,7 @@ interface DashboardProps {
 export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, onOpenCreateUser, onOpenBatchCsv }) => {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [recentLogs, setRecentLogs] = useState<AuditLog[]>([]);
+  const [unresolvedAlerts, setUnresolvedAlerts] = useState<number>(0);
   const [loading, setLoading] = useState(true);
 
   const formatBytes = (bytes: number) => {
@@ -41,12 +42,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, onOpenCreateUs
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
-      const [statsRes, logsRes] = await Promise.all([
+      const [statsRes, logsRes, alertsRes] = await Promise.all([
         apiClient.get<AdminStats>("/admin/stats"),
         apiClient.get<AuditLog[]>("/admin/audit-logs?limit=8"),
+        apiClient.get<{ unresolved_count: number }>("/admin/alerts/count").catch(() => ({ data: { unresolved_count: 0 } }))
       ]);
       setStats(statsRes.data);
       setRecentLogs(logsRes.data);
+      setUnresolvedAlerts(alertsRes.data.unresolved_count);
     } catch (e) {
       console.error("Failed to load dashboard data", e);
     } finally {
@@ -64,6 +67,35 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, onOpenCreateUs
 
   return (
     <div className="space-y-6">
+      {/* Critical Security Alert Warning Banner */}
+      {unresolvedAlerts > 0 && (
+        <div className="bg-red-950/70 border-2 border-red-800 p-5 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl shadow-red-950/40">
+          <div className="flex items-center gap-3.5">
+            <div className="p-3 bg-red-900 border border-red-700 rounded-xl text-red-200">
+              <ShieldAlert className="h-6 w-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <span>Security Threat Intercepted on Endpoint Fleet</span>
+                <span className="px-2 py-0.5 rounded-full bg-red-600 text-white text-xs font-bold">
+                  {unresolvedAlerts} Blocked
+                </span>
+              </h3>
+              <p className="text-xs text-red-300 mt-0.5">
+                Malicious files or ransomware-encrypted uploads were automatically blocked from contaminating server storage.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => onNavigate("alerts")}
+            className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-xl transition shadow-lg shrink-0 flex items-center gap-1.5"
+          >
+            <span>Review Security Alerts</span>
+            <ArrowUpRight className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       {/* Top Banner & Quick Actions */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-slate-800/80 border border-slate-700/80 p-6 rounded-2xl backdrop-blur-sm">
         <div>

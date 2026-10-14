@@ -150,3 +150,36 @@ class AdminStats(BaseModel):
     total_files: int
     total_devices: int
     active_devices_24h: int
+
+
+# ---------------- Security Alerts & Ransomware ----------------
+class SecurityAlertOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    user_id: Optional[UUID] = None
+    user_email: Optional[str] = None
+    user_name: Optional[str] = None
+    device_id: Optional[UUID] = None
+    device_name: Optional[str] = None
+    device_os: Optional[str] = None
+    file_name: str
+    folder_path: str
+    threat_type: str
+    severity: str
+    details: Optional[Any] = None
+    status: str
+    created_at: datetime
+
+
+class ReportThreatRequest(BaseModel):
+    device_id: Optional[UUID] = None
+    relative_path: str
+    file_name: str
+    threat_type: str
+    details: Optional[Any] = None
+
+
+class SecurityAlertCountResponse(BaseModel):
+    unresolved_count: int
+    critical_count: int

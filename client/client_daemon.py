@@ -305,6 +305,93 @@ class EndpointSyncDaemon:
         ".enterprise_backup"
     )
 
+    # Known ransomware extensions
+    RANSOMWARE_EXTENSIONS = {
+        ".locked", ".crypto", ".crypt", ".enc", ".crypted", ".ransom",
+        ".wnry", ".wannacry", ".locky", ".cerber", ".zepto", ".lockbit",
+        ".blackcat", ".alphv", ".stop", ".djvu", ".makop", ".mallox",
+        ".phobos", ".dharma", ".ryuk", ".conti", ".clop", ".blackmatter",
+        ".hive", ".revil", ".sodinokibi", ".medusa", ".akira", ".rhysida",
+        ".cactus", ".play", ".babuk", ".lockbit3", ".encr", ".crinf",
+        ".r5a", ".aesir", ".thor", ".osiris", ".enc1", ".payme", ".ransomware"
+    }
+
+    # Known ransom notes
+    RANSOM_NOTE_PATTERNS = {
+        "readme_to_decrypt.txt", "how_to_restore_files.txt", "decrypt_files.html",
+        "restore_files.txt", "how_to_recover.txt", "recovery_instructions.html",
+        "readme_for_decrypt.txt", "restore_info.txt", "!_readme_!.txt",
+        "decrypt_instructions.txt", "read_it.txt", "how_to_back.txt",
+        "recovery_key.txt", "decryptor.html", "help_decrypt.txt"
+    }
+
+    DOCUMENT_EXTENSIONS = {
+        ".txt", ".csv", ".tsv", ".pdf", ".doc", ".docx", ".xls", ".xlsx",
+        ".ppt", ".pptx", ".jpg", ".jpeg", ".png", ".gif", ".webp"
+    }
+
+    EXECUTABLE_EXTENSIONS = {
+        ".exe", ".scr", ".pif", ".vbs", ".bat", ".cmd", ".ps1", ".hta", ".cpl", ".jar"
+    }
+
+    def scan_for_threats(self, abs_path: str) -> Optional[Tuple[str, str]]:
+        filename = os.path.basename(abs_path).lower()
+
+        # 1. Ransom Note Check
+        if filename in self.RANSOM_NOTE_PATTERNS or "decrypt_instructions" in filename or "how_to_restore" in filename:
+            return ("RANSOM_NOTE_DETECTED", f"Matches known ransomware extortion note pattern: '{filename}'")
+
+        # 2. Ransomware Extension Check
+        _, ext = os.path.splitext(filename)
+        if ext in self.RANSOMWARE_EXTENSIONS:
+            return ("RANSOMWARE_EXTENSION_DETECTED", f"Known ransomware extension '{ext}' detected")
+
+        # 3. Double-Extension Trick (e.g. invoice.pdf.exe)
+        parts = filename.split(".")
+        if len(parts) >= 3:
+            first_ext = f".{parts[-2]}"
+            second_ext = f".{parts[-1]}"
+            if first_ext in self.DOCUMENT_EXTENSIONS and second_ext in self.EXECUTABLE_EXTENSIONS:
+                return ("DISGUISED_EXECUTABLE_TRAP", f"Disguised double extension '{first_ext}{second_ext}' detected")
+
+        # 4. Header inspection for disguised binaries
+        if ext in self.DOCUMENT_EXTENSIONS and os.path.exists(abs_path):
+            try:
+                with open(abs_path, "rb") as f:
+                    header = f.read(512)
+                if header.startswith(b"MZ"):
+                    return ("DISGUISED_EXECUTABLE_HEADER", f"File extension '{ext}' but binary contains Windows PE (MZ) header")
+                if header.startswith(b"\x7fELF"):
+                    return ("DISGUISED_ELF_BINARY", f"File extension '{ext}' but binary contains Linux ELF header")
+            except (OSError, PermissionError):
+                pass
+
+        return None
+
+    def report_threat_to_server(self, rel_path: str, filename: str, threat_type: str, details: dict):
+        server_url = config_manager.data.get("server_url")
+        token = config_manager.data.get("auth_token")
+        device_id = config_manager.data.get("device_id")
+        if not server_url or not token:
+            return
+        try:
+            with httpx.Client(base_url=server_url, timeout=10.0) as client:
+                headers = {"Authorization": f"Bearer {token}"}
+                client.post(
+                    "/api/v1/sync/report-threat",
+                    headers=headers,
+                    json={
+                        "device_id": device_id or None,
+                        "relative_path": rel_path,
+                        "file_name": filename,
+                        "threat_type": threat_type,
+                        "details": details
+                    }
+                )
+                print(f"[SECURITY ALERT] Threat reported to server: {filename} ({threat_type})")
+        except Exception as e:
+            print(f"[SECURITY] Failed to dispatch threat report to server: {e}")
+
     def __init__(self):
         self.running = False
         self.paused = False
@@ -361,6 +448,23 @@ class EndpointSyncDaemon:
                     return
             except OSError:
                 pass
+
+            # Pre-flight Threat Scanner
+            threat = self.scan_for_threats(abs_path)
+            if threat:
+                threat_type, reason = threat
+                fname = os.path.basename(abs_path)
+                print(f"[SECURITY ALERT] Malicious file blocked locally: {fname} ({threat_type})")
+                self.update_status(f"BLOCKED: {fname} (threat)", "red")
+                root_dirs = config_manager.data.get("watch_paths", [])
+                root_watch_dir = root_dirs[0] if root_dirs else str(Path.home() / "Documents")
+                rel_path = self.get_relative_path(abs_path, root_watch_dir)
+                threading.Thread(
+                    target=self.report_threat_to_server,
+                    args=(rel_path, fname, threat_type, {"reason": reason}),
+                    daemon=True
+                ).start()
+                return
 
         with self.lock:
             self.pending_files[abs_path] = (time.time() + delay, action)
@@ -504,6 +608,11 @@ class EndpointSyncDaemon:
 
                 if upload_res.status_code == 200:
                     print(f"[SYNC] Successfully uploaded {rel_path} ({file_size} bytes)")
+                elif upload_res.status_code == 403:
+                    print(f"[SECURITY ALERT] Upload rejected by server (malicious): {upload_res.text}")
+                    self.update_status(f"BLOCKED: {filename} (malicious)", "red")
+                    # Do not re-enqueue for retry
+                    return
                 else:
                     print(f"[SYNC ERROR] Upload failed ({upload_res.status_code}): {upload_res.text}")
                     # Re-schedule for retry after 15s

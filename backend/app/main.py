@@ -10,7 +10,7 @@ from app.core.config import settings
 from app.core.database import engine, Base, AsyncSessionLocal
 from app.core.security import get_password_hash
 import app.models
-from app.models import User, Device, FileRecord, FileVersion, AuditLog
+from app.models import User, Device, FileRecord, FileVersion, AuditLog, SecurityAlert
 from app.api.v1.auth import router as auth_router
 from app.api.v1.admin import router as admin_router
 from app.api.v1.sync import router as sync_router
@@ -29,6 +29,22 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_session_jti VARCHAR(64);"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS security_alerts (
+                id UUID PRIMARY KEY,
+                user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                device_id UUID REFERENCES devices(id) ON DELETE SET NULL,
+                file_name VARCHAR(255) NOT NULL,
+                folder_path VARCHAR(1024) NOT NULL,
+                threat_type VARCHAR(100) NOT NULL,
+                severity VARCHAR(20) DEFAULT 'CRITICAL',
+                details JSONB,
+                status VARCHAR(20) DEFAULT 'UNRESOLVED',
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_security_alerts_status ON security_alerts(status);
+            CREATE INDEX IF NOT EXISTS idx_security_alerts_created_at ON security_alerts(created_at);
+        """))
     logger.info("Database schema initialized and verified.")
 
     # 3. Seed initial IT Superuser Admin if none exists
