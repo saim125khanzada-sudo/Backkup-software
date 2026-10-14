@@ -268,25 +268,22 @@ The platform is now live on port 80 at `http://<your-server-ip>/`!
 
 ## 6. Client Agent Deployment on Laptops
 
-### Packaging Windows Client as `.exe`
-Run the provided batch script on a Windows build machine:
-```cmd
-cd client
-build_windows.bat
-```
-This generates a standalone binary in `dist\EnterpriseBackupAgent\EnterpriseBackupAgent.exe`.
-You can distribute this folder or create an MSI installer using Inno Setup or WiX.
+Pre-built native desktop clients are compiled automatically via GitHub Actions CI/CD on Windows and macOS runners.
 
-### macOS Client Deployment
-On macOS laptops:
+### Pre-built Binary Downloads:
+* **macOS Apple Installer Package (.pkg):** [Download EnterpriseBackupAgent.pkg](https://github.com/saim125khanzada-sudo/Backkup-software/releases/download/latest/EnterpriseBackupAgent.pkg)
+* **macOS Apple Disk Image (.dmg):** [Download EnterpriseBackupAgent.dmg](https://github.com/saim125khanzada-sudo/Backkup-software/releases/download/latest/EnterpriseBackupAgent.dmg)
+* **Windows Standalone Binary (.exe):** [Download EnterpriseBackupAgent.exe](https://github.com/saim125khanzada-sudo/Backkup-software/releases/download/latest/EnterpriseBackupAgent.exe)
+
+### macOS Quick 1-Line Installer:
+Run this directly in Mac Terminal (bypasses Apple Gatekeeper blocks and auto-starts on login):
 ```bash
-cd client
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python3 client_daemon.py
+curl -fsSL https://raw.githubusercontent.com/saim125khanzada-sudo/Backkup-software/main/client/install_mac.sh | bash
 ```
-To run as a persistent background daemon on macOS, create a `LaunchAgent` plist under `~/Library/LaunchAgents/com.enterprise.backup.plist`.
+
+### Local Compilation (Optional)
+* **Windows:** Run `client\build_windows.bat` to package a single-file executable via PyInstaller.
+* **macOS:** Run `python client/package_mac_app.py` to package `EnterpriseBackupInstaller.app` and `EnterpriseBackup-macOS.zip`.
 
 ---
 

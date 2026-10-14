@@ -28,6 +28,7 @@ client/venv/
 client/dist/
 client/build/
 client/*.spec
+*.spec
 *.log
 .enterprise_backup/
 
