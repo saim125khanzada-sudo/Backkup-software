@@ -7,7 +7,7 @@ import zipfile
 from pathlib import Path
 from typing import AsyncGenerator, BinaryIO, Tuple, List, Dict
 import aiofiles
-from fastapi import UploadFile, HTTPException
+from fastapi import UploadFile, HTTPException, status
 
 from app.core.config import settings
 from app.services.threat_scanner import threat_scanner_service, MaliciousFileException

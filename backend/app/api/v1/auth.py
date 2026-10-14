@@ -1,8 +1,11 @@
+import uuid
 import logging
+from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import verify_password, create_access_token, get_current_user
 from app.models.user import User
@@ -63,10 +66,6 @@ async def login(credentials: LoginRequest, db: AsyncSession = Depends(get_db)):
     file_count = file_count_res.scalar() or 0
 
     if user.is_admin:
-        import uuid
-        from datetime import timedelta
-        from app.core.config import settings
-
         session_jti = uuid.uuid4().hex
         user.admin_session_jti = session_jti
         await db.commit()
