@@ -20,20 +20,30 @@ logger = logging.getLogger("enterprise_backup.auth")
 
 @router.post("/login", response_model=Token)
 async def login(credentials: LoginRequest, db: AsyncSession = Depends(get_db)):
-    cleaned_email = str(credentials.email).strip().lower()
+    cleaned_input = str(credentials.email).strip().lower()
     
-    # Support 'admin' as direct shortcut for 'admin@enterprise.local'
-    query = select(User).where(
-        or_(
-            func.lower(User.email) == cleaned_email,
-            func.lower(User.email) == f"{cleaned_email}@enterprise.local"
-        )
-    )
+    # 1. Exact match by email
+    query = select(User).where(func.lower(User.email) == cleaned_input)
     result = await db.execute(query)
     user = result.scalar_one_or_none()
 
+    # 2. Support username shortcuts (e.g. 'saim' or 'admin' matching 'saim@...' or 'admin@...')
+    if not user and "@" not in cleaned_input:
+        prefix_query = select(User).where(
+            or_(
+                func.lower(User.email).like(f"{cleaned_input}@%"),
+                func.lower(User.email) == f"{cleaned_input}@enterprise.local",
+                func.lower(User.email) == f"{cleaned_input}@mobilelink.local"
+            )
+        )
+        result = await db.execute(prefix_query)
+        matches = result.scalars().all()
+        if matches:
+            # Prefer admin user if there are multiple matches
+            user = next((u for u in matches if u.is_admin), matches[0])
+
     if not user:
-        logger.warning(f"Login failed: no user account found for '{cleaned_email}'")
+        logger.warning(f"Login failed: no user account found for '{cleaned_input}'")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
