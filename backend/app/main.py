@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select, text
+from sqlalchemy import select, text, func
 
 from app.core.config import settings
 from app.core.database import engine, Base, AsyncSessionLocal
