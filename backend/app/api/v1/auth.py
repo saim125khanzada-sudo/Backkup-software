@@ -43,7 +43,22 @@ async def login(credentials: LoginRequest, db: AsyncSession = Depends(get_db)):
     )
     file_count = file_count_res.scalar() or 0
 
-    access_token = create_access_token(subject=str(user.id))
+    if user.is_admin:
+        import uuid
+        from datetime import timedelta
+        from app.core.config import settings
+
+        session_jti = uuid.uuid4().hex
+        user.admin_session_jti = session_jti
+        await db.flush()
+
+        access_token = create_access_token(
+            subject=str(user.id),
+            expires_delta=timedelta(minutes=settings.ADMIN_TOKEN_EXPIRE_MINUTES),
+            jti=session_jti
+        )
+    else:
+        access_token = create_access_token(subject=str(user.id))
 
     await log_audit(db, user.id, "AUTH_LOGIN", {"email": user.email})
 
@@ -61,6 +76,21 @@ async def login(credentials: LoginRequest, db: AsyncSession = Depends(get_db)):
     )
 
     return Token(access_token=access_token, token_type="bearer", user=user_out)
+
+
+@router.post("/logout")
+async def logout(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Terminates and invalidates the active admin session immediately so it can never be used again.
+    """
+    if current_user.is_admin:
+        current_user.admin_session_jti = None
+        await db.commit()
+    await log_audit(db, current_user.id, "AUTH_LOGOUT", {"email": current_user.email})
+    return {"message": "Session successfully terminated and invalidated"}
 
 
 @router.get("/me", response_model=UserOut)

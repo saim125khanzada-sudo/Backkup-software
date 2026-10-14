@@ -71,8 +71,9 @@ class StorageService:
         and file size in a single pass to prevent memory exhaustion.
         Returns: (storage_path, file_size, sha256_hash)
         """
-        # Clean relative path to avoid path traversal
-        clean_rel = os.path.normpath(relative_path).lstrip("/\\")
+        # Clean relative path to avoid path traversal and support arbitrary subfolders
+        norm_path = relative_path.replace("\\", "/").strip("/\\")
+        clean_rel = os.path.normpath(norm_path).replace("\\", "/")
         if ".." in clean_rel:
             raise HTTPException(status_code=400, detail="Invalid relative path traversal")
 
@@ -89,8 +90,15 @@ class StorageService:
                 chunk = await upload_file.read(settings.STREAM_CHUNK_SIZE)
                 if not chunk:
                     break
-                sha256.update(chunk)
                 bytes_written += len(chunk)
+                if bytes_written > settings.MAX_SINGLE_FILE_BYTES:
+                    if temp_path.exists():
+                        temp_path.unlink()
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="File exceeds maximum allowed single file size limit of 1GB"
+                    )
+                sha256.update(chunk)
                 await out_f.write(chunk)
 
         # Atomically replace destination file

@@ -9,13 +9,15 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://backup_admin:SecurePass2026@postgres:5432/enterprise_backup"
     
-    # Security
+    # Security & Sessions
     SECRET_KEY: str = "change-me-to-a-very-secure-random-secret-key-in-production-50char-min"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 30  # 30 days for client daemons
+    ADMIN_TOKEN_EXPIRE_MINUTES: int = 30  # 30 minutes maximum for admin sessions
     
     # Storage
     STORAGE_ROOT: str = "/data/storage"
+    MAX_SINGLE_FILE_BYTES: int = 1024 * 1024 * 1024  # 1 GB maximum single file size limit
     
     # Initial Admin Seed
     DEFAULT_ADMIN_EMAIL: str = "admin@enterprise.local"

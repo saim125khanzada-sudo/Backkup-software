@@ -91,19 +91,24 @@ async def check_hashes(
     up_to_date: List[str] = []
 
     for item in req.files:
+        norm_rel = item.relative_path.replace("\\", "/").strip("/\\")
+        # Ignore files exceeding the 1GB hard limit
+        if item.file_size > settings.MAX_SINGLE_FILE_BYTES:
+            continue
+
         query = select(FileRecord).where(
             FileRecord.user_id == current_user.id,
-            FileRecord.relative_path == item.relative_path
+            FileRecord.relative_path == norm_rel
         )
         res = await db.execute(query)
         record = res.scalar_one_or_none()
 
         if not record:
-            needed_uploads.append(item.relative_path)
+            needed_uploads.append(norm_rel)
         elif record.is_deleted_locally or record.sha256_hash.lower() != item.sha256_hash.lower():
-            needed_uploads.append(item.relative_path)
+            needed_uploads.append(norm_rel)
         else:
-            up_to_date.append(item.relative_path)
+            up_to_date.append(norm_rel)
 
     return HashCheckResponse(
         needed_uploads=needed_uploads,
@@ -124,6 +129,12 @@ async def upload_file(
     Streams incoming file upload, verifies hash & quota, saves to disk,
     and updates version history immutably.
     """
+    if file.size and file.size > settings.MAX_SINGLE_FILE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="File exceeds maximum allowed single file size limit of 1GB"
+        )
+
     # Touch device last seen
     if device_id:
         dev_res = await db.execute(select(Device).where(Device.id == device_id))

@@ -71,12 +71,24 @@ class ConfigManager:
             self.save()
 
     def remove_tombstone(self, relative_path: str):
-        if "tombstones" in self.data and relative_path in self.data["tombstones"]:
-            self.data["tombstones"].remove(relative_path)
+        if "tombstones" in self.data:
+            clean = relative_path.replace("\\", "/").strip("/\\")
+            parts = clean.split("/")
+            candidates = {clean}
+            for i in range(1, len(parts)):
+                candidates.add("/".join(parts[:i]))
+            self.data["tombstones"] = [t for t in self.data["tombstones"] if t not in candidates]
             self.save()
 
     def is_tombstoned(self, relative_path: str) -> bool:
-        return relative_path in self.data.get("tombstones", [])
+        clean = relative_path.replace("\\", "/").strip("/\\")
+        tombstones = self.data.get("tombstones", [])
+        if clean in tombstones:
+            return True
+        for t in tombstones:
+            if clean.startswith(t + "/"):
+                return True
+        return False
 
 
 config_manager = ConfigManager()
@@ -277,6 +289,9 @@ class SetupDialog:
 
 # ---------------- Core Sync Daemon & Watcher ----------------
 class EndpointSyncDaemon:
+    # 1 GB Maximum File Limit
+    MAX_SINGLE_FILE_BYTES = 1024 * 1024 * 1024  # 1,073,741,824 bytes
+
     # Files / Folders to strictly ignore
     IGNORE_PREFIXES = ("~$", ".~", "._")
     IGNORE_EXTENSIONS = (".tmp", ".crdownload", ".part", ".swp", ".lock")
@@ -334,8 +349,38 @@ class EndpointSyncDaemon:
         if self.should_ignore(abs_path):
             return
 
+        # Enforce 1GB Max File Limit
+        if action == "upload" and os.path.isfile(abs_path):
+            try:
+                fsize = os.path.getsize(abs_path)
+                if fsize > self.MAX_SINGLE_FILE_BYTES:
+                    fname = os.path.basename(abs_path)
+                    mb_size = fsize / (1024 * 1024)
+                    print(f"[SYNC SKIP] {fname} exceeds 1GB max limit ({mb_size:.1f} MB). Skipping.")
+                    self.update_status(f"Skipped {fname} (>1GB)", "red")
+                    return
+            except OSError:
+                pass
+
         with self.lock:
             self.pending_files[abs_path] = (time.time() + delay, action)
+
+    def scan_directory(self, dir_path: str):
+        """Recursively scans and schedules all files within any subfolder."""
+        if not os.path.exists(dir_path) or not os.path.isdir(dir_path):
+            return
+        if self.should_ignore(dir_path):
+            return
+
+        for root, dirs, files in os.walk(dir_path):
+            for fname in files:
+                full_p = os.path.join(root, fname)
+                if not self.should_ignore(full_p):
+                    self.schedule_event(full_p, "upload")
+
+    def handle_dir_deletion(self, dir_path: str, root_dir: str):
+        """Notifies deletion for a removed directory."""
+        self.handle_local_deletion(dir_path, root_dir)
 
     def handle_local_deletion(self, abs_path: str, root_watch_dir: str):
         if self.should_ignore(abs_path):
@@ -539,19 +584,28 @@ class EndpointSyncDaemon:
             def on_created(self, event: FileSystemEvent):
                 if not event.is_directory:
                     parent.schedule_event(event.src_path, "upload")
+                else:
+                    parent.scan_directory(event.src_path)
 
             def on_modified(self, event: FileSystemEvent):
                 if not event.is_directory:
                     parent.schedule_event(event.src_path, "upload")
+                else:
+                    parent.scan_directory(event.src_path)
 
             def on_deleted(self, event: FileSystemEvent):
                 if not event.is_directory:
                     parent.schedule_event(event.src_path, "delete")
+                else:
+                    parent.handle_dir_deletion(event.src_path, self.root_dir)
 
             def on_moved(self, event: FileSystemEvent):
                 if not event.is_directory:
                     parent.schedule_event(event.src_path, "delete")
                     parent.schedule_event(event.dest_path, "upload")
+                else:
+                    parent.handle_dir_deletion(event.src_path, self.root_dir)
+                    parent.scan_directory(event.dest_path)
 
         root_dirs = config_manager.data.get("watch_paths", [])
         watch_dir = root_dirs[0] if root_dirs else str(Path.home() / "Documents")

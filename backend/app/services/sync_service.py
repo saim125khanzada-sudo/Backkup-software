@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Optional, Any
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select, update, or_
 from fastapi import UploadFile, HTTPException, status
 
 from app.models.user import User
@@ -34,6 +34,7 @@ async def process_file_upload(
     client_modified_at: Optional[datetime],
     upload_file: UploadFile
 ) -> FileRecord:
+    relative_path = relative_path.replace("\\", "/").strip("/\\")
     # 1. Fetch existing file record if any
     query = select(FileRecord).where(
         FileRecord.user_id == user.id,
@@ -138,26 +139,31 @@ async def mark_file_deleted_locally(
     device_id: Optional[UUID],
     relative_path: str
 ) -> Optional[FileRecord]:
+    clean_path = relative_path.replace("\\", "/").strip("/\\")
     query = select(FileRecord).where(
         FileRecord.user_id == user.id,
-        FileRecord.relative_path == relative_path
+        or_(
+            FileRecord.relative_path == clean_path,
+            FileRecord.relative_path.startswith(clean_path + "/")
+        )
     )
     result = await db.execute(query)
-    file_record = result.scalar_one_or_none()
+    records = result.scalars().all()
 
-    if not file_record:
+    if not records:
         return None
 
     # Strictly mark deleted flag without removing physical file or record
-    file_record.is_deleted_locally = True
-    if device_id:
-        file_record.device_id = device_id
+    for record in records:
+        record.is_deleted_locally = True
+        if device_id:
+            record.device_id = device_id
 
-    await log_audit(
-        db,
-        user.id,
-        "FILE_DELETED_LOCALLY",
-        {"relative_path": relative_path, "file_id": str(file_record.id)}
-    )
+        await log_audit(
+            db,
+            user.id,
+            "FILE_DELETED_LOCALLY",
+            {"relative_path": record.relative_path, "file_id": str(record.id)}
+        )
     await db.flush()
-    return file_record
+    return records[0]

@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.core.config import settings
 from app.core.database import engine, Base, AsyncSessionLocal
@@ -25,9 +25,10 @@ async def lifespan(app: FastAPI):
     Path(settings.STORAGE_ROOT).mkdir(parents=True, exist_ok=True)
     logger.info(f"Storage directory initialized at: {settings.STORAGE_ROOT}")
 
-    # 2. Database table creation
+    # 2. Database table creation & schema migration
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_session_jti VARCHAR(64);"))
     logger.info("Database schema initialized and verified.")
 
     # 3. Seed initial IT Superuser Admin if none exists

@@ -34,6 +34,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const savedToken = localStorage.getItem("backup_auth_token");
     const savedUser = localStorage.getItem("backup_auth_user");
+    const loginTime = localStorage.getItem("backup_login_time");
+
+    // Enforce 30-minute client session timeout
+    if (loginTime && Date.now() - parseInt(loginTime, 10) > 30 * 60 * 1000) {
+      logout();
+      setLoading(false);
+      return;
+    }
+
     if (savedToken && savedUser) {
       try {
         setToken(savedToken);
@@ -43,20 +52,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
     setLoading(false);
+
+    // Periodically verify session duration
+    const interval = setInterval(() => {
+      const ts = localStorage.getItem("backup_login_time");
+      if (ts && Date.now() - parseInt(ts, 10) > 30 * 60 * 1000) {
+        logout();
+      }
+    }, 15000);
+
+    return () => clearInterval(interval);
   }, []);
 
   const login = (newToken: string, newUser: User) => {
     localStorage.setItem("backup_auth_token", newToken);
     localStorage.setItem("backup_auth_user", JSON.stringify(newUser));
+    localStorage.setItem("backup_login_time", Date.now().toString());
     setToken(newToken);
     setUser(newUser);
   };
 
-  const logout = () => {
-    localStorage.removeItem("backup_auth_token");
-    localStorage.removeItem("backup_auth_user");
-    setToken(null);
-    setUser(null);
+  const logout = async () => {
+    try {
+      await apiClient.post("/auth/logout");
+    } catch {
+      // Ignore network errors on logout
+    } finally {
+      localStorage.removeItem("backup_auth_token");
+      localStorage.removeItem("backup_auth_user");
+      localStorage.removeItem("backup_login_time");
+      setToken(null);
+      setUser(null);
+      if (window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
+    }
   };
 
   const refreshUser = async () => {

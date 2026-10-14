@@ -37,12 +37,18 @@ def get_password_hash(password: str) -> str:
         return pwd_context.hash(password.strip())
 
 
-def create_access_token(subject: Union[str, Any], expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(
+    subject: Union[str, Any],
+    expires_delta: Optional[timedelta] = None,
+    jti: Optional[str] = None
+) -> str:
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
         expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode = {"exp": expire, "sub": str(subject)}
+    if jti:
+        to_encode["jti"] = str(jti)
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
 
@@ -80,6 +86,7 @@ async def get_current_user(
 
 
 async def get_current_admin_user(
+    token: str = Depends(oauth2_scheme),
     current_user = Depends(get_current_user)
 ):
     if not current_user.is_admin:
@@ -87,4 +94,23 @@ async def get_current_admin_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="The user does not have administrative privileges"
         )
+
+    # Enforce strict single-session verification & revocation for administrators
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        token_jti = payload.get("jti")
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if not current_user.admin_session_jti or token_jti != current_user.admin_session_jti:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Admin session has expired or has been revoked by a newer login session",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     return current_user
