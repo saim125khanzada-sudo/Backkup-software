@@ -37,9 +37,13 @@ async def lifespan(app: FastAPI):
     # 3. Seed initial IT Superuser Admin if none exists
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            select(User).where(User.email == settings.DEFAULT_ADMIN_EMAIL.lower())
+            select(User).where(func.lower(User.email) == settings.DEFAULT_ADMIN_EMAIL.lower())
         )
         admin = result.scalar_one_or_none()
+        if not admin:
+            any_admin_res = await session.execute(select(User).where(User.is_admin == True))
+            admin = any_admin_res.scalars().first()
+
         if not admin:
             admin_user = User(
                 email=settings.DEFAULT_ADMIN_EMAIL.lower(),
@@ -58,7 +62,7 @@ async def lifespan(app: FastAPI):
             admin.is_active = True
             admin.is_admin = True
             await session.commit()
-            logger.info(f"Synchronized IT Admin password for: {settings.DEFAULT_ADMIN_EMAIL}")
+            logger.info(f"Synchronized IT Admin password for: {admin.email}")
 
     yield
 

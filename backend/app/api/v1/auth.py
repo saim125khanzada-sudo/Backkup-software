@@ -1,6 +1,7 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 
 from app.core.database import get_db
 from app.core.security import verify_password, create_access_token, get_current_user
@@ -11,15 +12,33 @@ from app.schemas import LoginRequest, Token, UserOut
 from app.services.sync_service import log_audit
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+logger = logging.getLogger("enterprise_backup.auth")
 
 
 @router.post("/login", response_model=Token)
 async def login(credentials: LoginRequest, db: AsyncSession = Depends(get_db)):
     cleaned_email = str(credentials.email).strip().lower()
-    result = await db.execute(select(User).where(func.lower(User.email) == cleaned_email))
+    
+    # Support 'admin' as direct shortcut for 'admin@enterprise.local'
+    query = select(User).where(
+        or_(
+            func.lower(User.email) == cleaned_email,
+            func.lower(User.email) == f"{cleaned_email}@enterprise.local"
+        )
+    )
+    result = await db.execute(query)
     user = result.scalar_one_or_none()
 
-    if not user or not verify_password(credentials.password, user.password_hash):
+    if not user:
+        logger.warning(f"Login failed: no user account found for '{cleaned_email}'")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if not verify_password(credentials.password, user.password_hash):
+        logger.warning(f"Login failed: password mismatch for user '{user.email}'")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
