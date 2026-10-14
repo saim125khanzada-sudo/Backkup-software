@@ -24,8 +24,12 @@ export const Login: React.FC = () => {
         setError(detail);
       } else if (Array.isArray(detail) && detail.length > 0) {
         setError(detail.map((d: any) => d.msg || d).join(", "));
+      } else if (err.response?.status === 502 || err.response?.status === 503) {
+        setError("Backend service is initializing or restarting. Please wait 10 seconds and try again.");
+      } else if (!err.response) {
+        setError("Cannot connect to server. Please verify the server is running and accessible.");
       } else {
-        setError("Authentication failed. Check your credentials.");
+        setError(err.response?.data?.message || "Authentication failed. Check your credentials.");
       }
     } finally {
       setLoading(false);

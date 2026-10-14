@@ -16,7 +16,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 @router.post("/login", response_model=Token)
 async def login(credentials: LoginRequest, db: AsyncSession = Depends(get_db)):
     cleaned_email = str(credentials.email).strip().lower()
-    result = await db.execute(select(User).where(User.email == cleaned_email))
+    result = await db.execute(select(User).where(func.lower(User.email) == cleaned_email))
     user = result.scalar_one_or_none()
 
     if not user or not verify_password(credentials.password, user.password_hash):
@@ -50,7 +50,7 @@ async def login(credentials: LoginRequest, db: AsyncSession = Depends(get_db)):
 
         session_jti = uuid.uuid4().hex
         user.admin_session_jti = session_jti
-        await db.flush()
+        await db.commit()
 
         access_token = create_access_token(
             subject=str(user.id),
